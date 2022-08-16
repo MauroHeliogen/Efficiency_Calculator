@@ -1,0 +1,1020 @@
+classdef Efficiency_Calculator_App < matlab.apps.AppBase
+
+    % Properties that correspond to app components
+    properties (Access = public)
+        UIFigure                     matlab.ui.Figure
+        resultsTable                 matlab.ui.control.Table
+        ResultsTextArea              matlab.ui.control.TextArea
+        ResultsTextAreaLabel         matlab.ui.control.Label
+        ShippingEfficiencyCalculatorLabel  matlab.ui.control.Label
+        TabGroup                     matlab.ui.container.TabGroup
+        Scenarios                    matlab.ui.container.Tab
+        DistanceInBox                matlab.ui.control.NumericEditField
+        DistanceMilesEditFieldLabel  matlab.ui.control.Label
+        DesiredUnitsIn               matlab.ui.control.NumericEditField
+        DesiredUnitsEditFieldLabel   matlab.ui.control.Label
+        ButtonGroup                  matlab.ui.container.ButtonGroup
+        CustomInputDims              matlab.ui.control.RadioButton
+        StepFunction                 matlab.ui.control.RadioButton
+        CustomDistance               matlab.ui.control.RadioButton
+        Gen4Data                     matlab.ui.control.RadioButton
+        Unitsasinput                 matlab.ui.control.RadioButton
+        InputsTab                    matlab.ui.container.Tab
+        varL                         matlab.ui.control.Slider
+        varH                         matlab.ui.control.Slider
+        varW                         matlab.ui.control.Slider
+        AllowableVariationSlider_2Label  matlab.ui.control.Label
+        ChangeInputParametersButton  matlab.ui.control.Button
+        UnitsInput                   matlab.ui.control.Switch
+        MassInput                    matlab.ui.control.NumericEditField
+        MasskgEditFieldLabel         matlab.ui.control.Label
+        HeightInput                  matlab.ui.control.NumericEditField
+        HLabel                       matlab.ui.control.Label
+        LengthInput                  matlab.ui.control.NumericEditField
+        LengthLabel                  matlab.ui.control.Label
+        WidthInput                   matlab.ui.control.NumericEditField
+        WidthLabel                   matlab.ui.control.Label
+        TrailerInput                 matlab.ui.control.DropDown
+        TrailerDropDownLabel         matlab.ui.control.Label
+        VaryLabel                    matlab.ui.control.Label
+        modWbox                      matlab.ui.control.CheckBox
+        modLbox                      matlab.ui.control.CheckBox
+        modHbox                      matlab.ui.control.CheckBox
+        OutputTab                    matlab.ui.container.Tab
+        AllowableVariationSlider     matlab.ui.control.Slider
+        AllowableVariationLabel      matlab.ui.control.Label
+        GraphCheckBox                matlab.ui.control.CheckBox
+        outUnitsSwitch               matlab.ui.control.Switch
+        OriginalDimensionsCheckBox   matlab.ui.control.CheckBox
+        IdealDimensionsCheckBox      matlab.ui.control.CheckBox
+        AdvancedTab                  matlab.ui.container.Tab
+        HomePlateSwitch              matlab.ui.control.Switch
+        trailerHeight                matlab.ui.control.NumericEditField
+        WidthinLabel_2               matlab.ui.control.Label
+        trailerMass                  matlab.ui.control.NumericEditField
+        MasskgEditFieldLabel_2       matlab.ui.control.Label
+        trailerWidth                 matlab.ui.control.NumericEditField
+        WidthinLabel                 matlab.ui.control.Label
+        trailerLength                matlab.ui.control.NumericEditField
+        LengthinLabel                matlab.ui.control.Label
+        LengthEditFieldLabel_6       matlab.ui.control.Label
+        CalculateButton              matlab.ui.control.Button
+    end
+
+    
+    properties (Access = private)
+        ogL % inputted length
+        ogW % inputted width
+        ogH % inputted height
+        ogM % inputted mass
+        vDim = [102, 636, 102, 21772.434] % Trailer dimensions
+        vertL % Can length be vertical
+        vertW % Can width be vertical
+        vertH % Can height be vertical
+        mmOrIn = "in." % mm or in as input values
+        idealOut % will ideal dimensions be shown
+        ogOut = true; % will original dimensions be shown
+        unitOut % mm or in as output values
+        HomePlate % bool, is Home Plate being analyzed?
+        vName % Trailer Van name
+        costs % Dollar per mile per m^2 of HelioStat
+        Out = "" % string, output parameters
+        pack = [2, 6, 6.375, 7, 442.253] % Sp, L, H, W [in]
+        CostperMile = 3.24 % Cost for semi truck mile
+        graph % Description
+        scenario = 1 % 5 scenarios
+        numUnitsIn % User input units
+        custDist % Custom Distance (miles)
+        variation % Description
+        modW % Is the width allowed to be modified
+        modL % Is the length allowed to be modified
+        modH % Is the height allowed to be modified
+    end
+    
+    methods (Access = private)
+
+        function HScombos = find_combos(app) 
+            vW = app.varW.Value/100;
+            vL = app.varL.Value/100;
+            vH = app.varH.Value/100;
+
+            if ~app.modW, vW = 0; end
+            if ~app.modL, vL = 0; end
+            if ~app.modH, vH = 0; end
+            spc = 0.05; % [in] ~= 0.00254m
+            
+            widths = app.ogW*(1-vW): app.ogW*spc: app.ogW*(1+vW); % W [in]
+            lengths = app.ogL*(1-vL): app.ogL*spc: app.ogL*(1+vL); % L [in]
+            heights = app.ogH*(1-vH): app.ogH*spc: app.ogH*(1+vH); % H [in]
+
+            HScombos = [];
+            for i = 1:length(widths)
+                temp = [widths(i)];
+                for j = 1:length(lengths)
+                    temp = [temp(1:1), lengths(j)];
+                    for k = 1:length(heights)
+                        temp = [temp(1:2), heights(k)];
+                        if isempty(HScombos), HScombos = temp;
+                        else, HScombos = [HScombos;temp]; end
+                    end
+                end
+            end
+        end
+        
+        function res = calc_most_units(app, HSDims)
+            Wblocks = 5; % closer to 10 % when thin-side is along the width (53' direction), you need extra spacers for every ~26 units
+            uniL = 70; % approximate width of shipping unit [in]
+        
+            van_w = app.vDim(1); % [in]
+            van_l = app.vDim(2); % [in]
+            van_H = app.vDim(3); % [in]
+            van_M = app.vDim(4); % [lbs]
+            max_vol = van_w * van_l * van_H; % [ft^3]
+            
+            blocks1.w = floor((van_w - app.pack(1) - app.pack(4)) ./ (HSDims(:, 1) + app.pack(1)));
+            blocks1.l = floor(van_l ./ (HSDims(:, 2) + app.pack(2)));
+            blocks1.H = floor(van_H ./ (HSDims(:, 3) + app.pack(3)));
+        
+            blocks2.w = blocks1.w;
+            blocks2.l = floor(van_l ./ (HSDims(:, 3) + app.pack(2)));
+            blocks2.H = floor(van_H ./ (HSDims(:, 2) + app.pack(3)));
+        
+            blocks3.w = floor(van_w ./ (HSDims(:, 3) + app.pack(4)));
+            blocks3.l = floor((van_l - (Wblocks * (app.pack(1) + app.pack(4)))) ./ (HSDims(:, 1) + app.pack(1)));
+            blocks3.H = blocks2.H;
+        
+            blocks4.w = floor(van_w ./ (HSDims(:, 2) + app.pack(4)));
+            blocks4.l = blocks3.l;
+            blocks4.H = blocks1.H;
+
+            blocks5.w = blocks4.w;
+            blocks5.l = blocks2.l;
+            blocks5.H = floor((van_H - app.pack(1) - app.pack(4)) ./ (HSDims(:, 3) + app.pack(1)));
+
+            blocks6.w = blocks3.w;
+            blocks6.l = blocks1.l;
+            blocks6.H = blocks5.H;
+        
+            Uni1 = blocks1.w .* blocks1.l .* blocks1.H;
+            Uni2 = blocks2.w .* blocks2.l .* blocks2.H;
+            Uni3 = blocks3.w .* blocks3.l .* blocks3.H;
+            Uni4 = blocks4.w .* blocks4.l .* blocks4.H;
+            Uni5 = blocks5.w .* blocks5.l .* blocks5.H;
+            Uni6 = blocks6.w .* blocks6.l .* blocks6.H;
+
+%             if app.vertW, Uni5 = 1; Uni6 = 1; end
+%             if app.vertL, Uni2 = 1; Uni3 = 1; end
+%             if app.vertH, Uni1 = 1; Uni4 = 1; end
+
+            maxes = [max(Uni1), max(Uni2), max(Uni3), max(Uni4), max(Uni5), max(Uni6)];
+        
+            if max(maxes) == maxes(1)
+                res.units = Uni1;
+                vol.w = (blocks1.w .* (HSDims(:, 1) + app.pack(1))) + app.pack(1) + app.pack(4);
+                vol.l = blocks1.l .* (HSDims(:, 2) + app.pack(2));
+                vol.H = blocks1.H .* (HSDims(:, 3) + app.pack(3));
+                res.HplusP = [(HSDims(:, 1) + app.pack(1)), (HSDims(:, 2) + app.pack(2)), (HSDims(:, 3) + app.pack(3))];
+                res.ori_HSDims = [HSDims(:, 1), HSDims(:, 2), HSDims(:, 3)];
+                res.weights = ((Uni1 .* app.ogM) + ((blocks1.l .* blocks1.H) .* app.pack(5))) ./ van_M;
+                res.blocks = [blocks1.l, blocks1.w, blocks1.H];
+        
+            elseif max(maxes) == maxes(2)
+                res.units = Uni2;
+                vol.w = (blocks2.w .* (HSDims(:, 1) + app.pack(1))) + app.pack(1) + app.pack(4);
+                vol.l = blocks2.l .* (HSDims(:, 3) + app.pack(2));
+                vol.H = blocks2.H .* (HSDims(:, 2) + app.pack(3));
+                res.HplusP = [(HSDims(:, 1) + app.pack(1)), (HSDims(:, 3) + app.pack(2)), (HSDims(:, 2) + app.pack(3))];
+                res.ori_HSDims = [HSDims(:, 1), HSDims(:, 3), HSDims(:, 2)];
+                res.weights = ((Uni2 .* app.ogM) + ((blocks2.l .* blocks2.H).*app.pack(5))) ./ van_M;
+                res.blocks = [blocks2.l, blocks2.w, blocks2.H];
+        
+            elseif max(maxes) == maxes(3)
+                res.units = Uni3;
+                vol.w = blocks3.w .* (HSDims(:, 3) + app.pack(4));
+                vol.l = (blocks3.l .* (HSDims(:, 1) + app.pack(1))) + (Wblocks * (app.pack(1) + app.pack(4)));
+                vol.H = blocks3.H .* (HSDims(:, 2) + app.pack(3));
+                res.HplusP = [(HSDims(:, 3) + app.pack(4)), (HSDims(:, 1) + app.pack(1)), (HSDims(:, 2) + app.pack(3))];
+                res.ori_HSDims = [HSDims(:, 3), HSDims(:, 1), HSDims(:, 2)];
+                res.weights = ((Uni3 .* app.ogM) + (floor(van_l/uniL)*blocks3.H*app.pack(5))) ./ van_M;
+                res.blocks = [blocks3.l, blocks3.w, blocks3.H];
+        
+            elseif max(maxes) == maxes(4)
+                res.units = Uni4;
+                vol.w = blocks4.w .* (HSDims(:, 2) + app.pack(4));
+                vol.l = (blocks4.l .* (HSDims(:, 1) + app.pack(1))) + (Wblocks * (app.pack(1) + app.pack(4)));
+                vol.H = blocks4.H .* (HSDims(:, 3) + app.pack(3));
+                res.HplusP = [(HSDims(:, 2) + app.pack(4)), (HSDims(:, 1) + app.pack(1)), (HSDims(:, 3) + app.pack(3))];
+                res.ori_HSDims = [HSDims(:, 2), HSDims(:, 1), HSDims(:, 3)];
+                res.weights = ((Uni4 .* app.ogM) + (floor(van_l/uniL)*blocks4.H*app.pack(5))) ./ van_M;
+                res.blocks = [blocks4.l, blocks4.w, blocks4.H];
+
+            elseif max(maxes) == maxes(5)
+                res.units = Uni5;
+                vol.w = blocks5.w .* (HSDims(:, 2) + app.pack(4));
+                vol.l = blocks5.l .* (HSDims(:, 3) + app.pack(2));
+                vol.H = (blocks5.H .* (HSDims(:, 1) + app.pack(1))) + app.pack(1) + app.pack(4);
+                res.HplusP = [(HSDims(:, 2) + app.pack(4)), (HSDims(:, 3) + app.pack(2)), (HSDims(:, 1) + app.pack(1))];
+                res.ori_HSDims = [HSDims(:, 2), HSDims(:, 3), HSDims(:, 1)];
+                res.weights = ((Uni5 .* app.ogM) + (blocks5.w*blocks5.l*app.pack(5))) ./ van_M;
+                res.blocks = [blocks5.l, blocks5.w, blocks5.H];
+
+            elseif max(maxes) == maxes(6)
+                res.units = Uni6;
+                vol.w = blocks6.w .* (HSDims(:, 3) + app.pack(4));
+                vol.l = blocks6.l .* (HSDims(:, 2) + app.pack(2));
+                vol.H = (blocks6.H .* (HSDims(:, 1) + app.pack(1))) + app.pack(1) + app.pack(4);
+                res.HplusP = [(HSDims(:, 3) + app.pack(4)), (HSDims(:, 2) + app.pack(2)), (HSDims(:, 1) + app.pack(1))];
+                res.ori_HSDims = [HSDims(:, 3), HSDims(:, 2), HSDims(:, 1)];
+                res.weights = ((Uni6 .* app.ogM) + (blocks6.w*blocks6.l*app.pack(5))) ./ van_M;
+                res.blocks = [blocks6.l, blocks6.w, blocks6.H];
+            end
+        
+            res.vol_eff = (vol.w .* vol.l .* vol.H) ./ max_vol;
+        end
+
+        function DolPerM2 = adj_area(app, cost)
+            % it will be more accurate to subtract certain L and W from the area    
+            sin_ratio = 1.27/ 1.6421773608;
+            in2m = 39.37; % inch -> [m]
+        
+            if app.HomePlate
+                DolPerM2 = cost./((app.vDim(1)/in2m).*(app.vDim(2)/in2m)*sin_ratio);
+            else, DolPerM2 = cost./((app.vDim(1)/in2m).*(app.vDim(2)/in2m));
+            end
+        end
+        
+        function ideal_dims = disp_ideal_data(app, totals)
+            ind_limM = totals.weights < 1;
+            inConv = 1;
+
+            if ~strcmp(app.mmOrIn, app.unitOut)
+                if app.mmOrIn == "mm", inConv = 1/25.4;  % in -> [mm]
+                elseif app.mmOrIn == "in.", inConv = 25.4; end % mm -> [in.]
+            end
+
+            ind = find(app.costs == min(app.costs(ind_limM)));
+            temp_ideal_dims = totals.ori_HSDims(ind,:); % [in]
+            ideal_dims = temp_ideal_dims * inConv;
+            maxUnits = max(totals.units(ind_limM));
+            l_dims = min(ideal_dims);
+            h_dims = max(ideal_dims);
+            best_vol_eff = totals.vol_eff(ind);
+            low_vol_eff = min(best_vol_eff) * 100;
+            high_vol_eff = max(best_vol_eff) * 100;
+            line = sprintf('--------------------------------------------------\n');
+        
+            if app.idealOut
+                % Display various parameters based on ideal dimensions
+                s1 = sprintf('Units Per truck:     %d \n', maxUnits);
+                s2 = sprintf('Blocks [WxLxH]:   %d x %d x %d \n', totals.blocks(ind(1),1), totals.blocks(ind(1),2), totals.blocks(ind(1),3));
+                
+                if low_vol_eff == high_vol_eff, s3 = sprintf('Volume Eff. [%%]:    %f \n', low_vol_eff);
+                else, s3 = sprintf('Volume Eff. [%%]:    %f - %f \n', low_vol_eff, high_vol_eff); end
+                % sprintf('Max Vol. Eff. [%%]: %f \n', (max(totals.vol_eff)*100));
+                % sprintf('HSplusP Max Dims [in]: %f, %f, %f \n', HSplusPdims(1), HSplusPdims(2), HSplusPdims(3));
+                s4 = sprintf('Mass eff. [%%]:        %f \n\n', max(totals.weights(ind(1)))*100);
+            
+                if size(ideal_dims) == [1, 3]
+                    l_dims = ideal_dims;
+                    h_dims = ideal_dims;
+                end
+            
+                if l_dims(1) == h_dims(1), s5 = sprintf('W [%s]:                  %f \n', app.unitOut, l_dims(1)); 
+                else, s5 = sprintf('W [%s]:                  %f - %f \n', app.unitOut, l_dims(1), h_dims(1)); end
+                
+                if l_dims(2) == h_dims(2), s6 = sprintf('L [%s]:                 %f \n', app.unitOut, l_dims(2)); 
+                else, s6 = sprintf('L [%s]:                 %f - %f \n', app.unitOut, l_dims(2), h_dims(2)); end
+                
+                if l_dims(3) == h_dims(3), s7 = sprintf('H [%s]:                 %f \n', app.unitOut, l_dims(3)); 
+                else, s7 = sprintf('H [%s]:                 %f - %f \n', app.unitOut, l_dims(3), h_dims(3)); end
+                
+                app.Out = append(app.Out, s1, s2, s3, s4, s5, s6, s7);
+                if app.ogOut, app.Out = append(app.Out, line); end
+            end
+        
+            if app.ogOut
+                % kg2lbs = 2.205;
+                og_dims = [app.ogL, app.ogW, app.ogH];
+                ogDta = calc_most_units(app, og_dims);
+                og_cost = adj_area(app, (app.CostperMile / ogDta.units));
+        
+                s1 = sprintf('Using Orig. Dims \n');
+                s2 = sprintf('Cost [$/mile/m^2]: %f \n', og_cost);
+                s3 = sprintf('Units:                     %d \n', ogDta.units);
+                s4 = sprintf('Blocks [LxWxH]:    %d x %d x %d \n', ogDta.blocks(1), ogDta.blocks(2), ogDta.blocks(3));
+                s5 = sprintf('Volume Eff. [%%]:     %f \n', ogDta.vol_eff*100);
+                s6 = sprintf('Mass Eff. [%%]:        %f \n\n', ogDta.weights*100);
+                s7 = sprintf('Dim w/ pack. [%s]: %f, %f, %f \n', app.mmOrIn, ogDta.HplusP(1), ogDta.HplusP(2), ogDta.HplusP(3));
+                app.Out = append(app.Out, s1, s2, s3, s4, s5, s6);
+                % if app.HplusP, app.Out = append(app.Out, s7);
+            end
+        
+        end
+
+        function get_ideal_cost_dims(app, results)
+            min_cost = min(app.costs);
+            s1 = sprintf('Dims w/ Min. Cost \n');
+            s2 = sprintf('Cost [$/mile/m^2]: %f \n', min_cost);
+            if app.idealOut, app.Out = append(s1, s2); 
+            else, app.Out = "";
+            end
+            disp_ideal_data(app, results);
+        end
+            
+        function units2dims(app, data)
+            ind = find(data.units == app.numUnitsIn);
+            dims = data.ori_HSDims(ind, :);
+            vols = data.vol_eff(ind, :);
+            low_vol_eff = min(vols);
+            high_vol_eff = max(vols);
+            l_dims = min(dims);
+            h_dims = max(dims);
+            uniStr = sprintf("%d", app.numUnitsIn);
+
+            
+            if isempty(dims)
+                s1 = sprintf("No dimensions within 20%% will yield ");
+                s2 = sprintf(" units \n");
+
+                if app.numUnitsIn > max(data.units)
+                    s3 = sprintf("Please choose a smaller number of units");
+                    app.Out = append(app.Out, s1, uniStr, s2, s3);
+                elseif app.numUnitsIn < min(data.units)
+                    s3 = sprintf("Please choose a larger number of units");
+                    app.Out = append(app.Out, s1, uniStr, s2, s3);
+                else
+                    temp_num = app.numUnitsIn - 1;
+                    for i = 1: app.numUnitsIn
+                        if ~isempty(find(data.units == temp_num, 1))
+                            app.numUnitsIn = temp_num;
+                            units2dims(app, data);
+                            break
+                        else, temp_num = temp_num - 1;
+                        end
+                    end
+                end
+                
+            else
+                s0 = sprintf("Units: %d \n", app.numUnitsIn);
+                s1 = sprintf('Blocks [WxLxH]:   %d x %d x %d \n', data.blocks(ind(1),1), data.blocks(ind(1),2), data.blocks(ind(1),3));
+                if low_vol_eff == high_vol_eff, s2 = sprintf('Volume Eff. [%%]:    %f \n', low_vol_eff);
+                else, s2 = sprintf('Volume Eff. [%%]:    %f - %f \n', low_vol_eff, high_vol_eff); end
+
+                s3 = sprintf('Mass eff. [%%]:        %f \n\n', max(data.weights(ind(1)))*100);
+            
+                if size(dims) == [1, 3]
+                    l_dims = ideal_dims;
+                    h_dims = ideal_dims;
+                end
+            
+                if l_dims(1) == h_dims(1), s4 = sprintf('W [mm]:                %f \n', l_dims(1)); 
+                else, s4 = sprintf('W [mm]:                %f - %f \n', l_dims(1), h_dims(1)); end
+                
+                if l_dims(2) == h_dims(2), s5 = sprintf('L [mm]:                 %f \n', l_dims(2)); 
+                else, s5 = sprintf('L [mm]:                 %f - %f \n', l_dims(2), h_dims(2)); end
+                
+                if l_dims(3) == h_dims(3), s6 = sprintf('H [mm]:                 %f \n', l_dims(3)); 
+                else, s6 = sprintf('H [mm]:                 %f - %f \n', l_dims(3), h_dims(3)); end
+                
+                app.Out = append(app.Out, s0, s1, s2, s3, s4, s5, s6);
+
+
+
+            end
+        end
+        
+        function showGen4(app)
+            app.ogM = 31.75; % [kg]
+            app.vDim = [98, 636, 108, 45000];
+            dims = [1.1875, 63, 47.25];
+            app.ogL = dims(1);
+            app.ogW = dims(2);
+            app.ogH = dims(3);
+            results = calc_most_units(app, dims);
+            app.ogOut = true;
+            app.idealOut = false;
+            disp_ideal_data(app, results)
+        end
+        
+        function calcLocation(app, data)
+            maxUnits = max(data.units);
+            totalCost = app.CostperMile * app.custDist;
+            cstPerHS = totalCost / maxUnits;
+            s1 = sprintf("Total Cost for %d miles [$]: %d \n", app.custDist, totalCost);
+            s2 = sprintf("Total Cost per HelioStat [$]:   %f \n", cstPerHS);
+            app.Out = append(app.Out, s1, s2);
+        end
+        
+        function showStep(app)
+            s1 = sprintf("Step Functions: \n");
+            app.Out = append(app.out, s1); 
+        end
+        
+    end
+    
+
+    % Callbacks that handle component events
+    methods (Access = private)
+
+        % Value changed function: HeightInput, LengthInput, MassInput, 
+        % ...and 4 other components
+        function Inputs(app, event)
+            app.ogW = app.WidthInput.Value;
+            app.ogL = app.LengthInput.Value;
+            app.ogH = app.HeightInput.Value;
+            app.ogM = app.MassInput.Value;
+            
+            app.modW = app.modWbox.Value;
+            app.modL = app.modLbox.Value;
+            app.modH = app.modHbox.Value;
+            
+            app.varW.Enable = app.modW;
+            app.varW.Visible = app.modW;
+            app.varL.Enable = app.modL;
+            app.varL.Visible = app.modL;
+            app.varH.Enable = app.modH;
+            app.varH.Visible = app.modH;
+
+            if app.HomePlateSwitch.Value == "Home Plate", app.HomePlate = true;
+            else, app.HomePlate = false; end
+            
+            app.mmOrIn = app.UnitsInput.Value;
+            app.numUnitsIn = app.DesiredUnitsIn.Value;
+            app.custDist = app.DistanceInBox.Value;
+
+            if app.modW || app.modL || app.modH, app.idealOut = true; end
+        end
+
+        % Value changed function: TrailerInput
+        function TrailerSelection(app, event)
+            app.vName = app.TrailerInput.Value;
+            % W[in], L[in], H[in], M[kg]
+            enbl = false;
+            vDims = [
+                [102, 636, 102, 21772.434]; % Flatbed
+                [98, 636, 108, 20411.657]; % Dry Van
+                [102, 576, 98, 20411.657]; % Conestoga
+                [92, 474, 106, 26308.358]; % HC Sea
+                [92, 474, 94, 27215.543]; % Sea
+                ];
+            
+            if app.mmOrIn == "mm"
+                vDims = vDims .* 25.4; end
+
+            if app.vName == "53' Flatbed" , app.vDim = vDims(1,:); 
+            elseif app.vName == "53' Dry Van", app.vDim = vDims(2,:); 
+            elseif app.vName == "48' Conestoga", app.vDim = vDims(3,:);
+            elseif app.vName == "40' HC Sea", app.vDim = vDims(4,:);
+            elseif app.vName == "40' Sea", app.vDim = vDims(5,:);
+            elseif app.vName == "Custom"
+                app.TabGroup.SelectedTab = app.AdvancedTab;
+                enbl = true;
+            end
+
+            app.trailerLength.Enable = enbl;
+            app.trailerWidth.Enable = enbl;
+            app.trailerHeight.Enable = enbl;
+            app.trailerMass.Enable = enbl;
+
+            app.trailerWidth.Value = app.vDim(1);
+            app.trailerLength.Value = app.vDim(2);
+            app.trailerHeight.Value = app.vDim(3);
+            app.trailerMass.Value = app.vDim(4);
+        end
+
+        % Value changed function: IdealDimensionsCheckBox, 
+        % ...and 2 other components
+        function OutputSettings(app, event)
+            app.idealOut = app.IdealDimensionsCheckBox.Value; % bool
+            app.ogOut = app.OriginalDimensionsCheckBox.Value; % bool
+            app.unitOut = app.outUnitsSwitch.Value;
+            app.graph = app.GraphCheckBox.Value;
+            app.variation = app.AllowableVariationSlider.Value/100;
+            app.unitOut = app.outUnitsSwitch.Value;
+
+            if app.idealOut
+                app.GraphCheckBox.Enable = true; 
+                app.AllowableVariationSlider.Enable = true;
+                app.outUnitsSwitch.Enable = true;
+            else
+                app.GraphCheckBox.Enable = false; 
+                app.GraphCheckBox.Value = false;
+                app.AllowableVariationSlider.Enable = false;
+                app.graph = false; 
+            end
+
+        end
+
+        % Button pushed function: CalculateButton
+        function Calculate(app, event)
+            % Sp [in], W [in], H[in], L [in], M [kg];
+            Inputs(app);
+            OutputSettings(app);
+            TrailerSelection(app);
+            
+            HScombos = find_combos(app); % [in]
+            results = calc_most_units(app, HScombos);
+            
+            DolPerMiPerHS = app.CostperMile ./ results.units; % [$]
+            app.costs = adj_area(app, DolPerMiPerHS);
+
+            if app.scenario == 1, units2dims(app, results);
+            elseif app.scenario == 2, showGen4(app);
+            elseif app.scenario == 3, calcLocation(app, results);
+            elseif app.scenario == 4, showStep(app);
+            elseif app.scenario == 5, disp_ideal_data(app, results);
+            end
+
+            Output(app);
+            app.Out = "";
+        end
+
+        % Value changed function: ResultsTextArea
+        function Output(app, event)
+            app.ResultsTextArea.Value = app.Out;
+        end
+
+        % Value changed function: UnitsInput
+        function UnitsInDetect(app, event)
+            in2mm = 25.4;
+            if app.mmOrIn == "in."
+                app.WidthInput.Value = app.WidthInput.Value * in2mm;
+                app.LengthInput.Value = app.LengthInput.Value * in2mm;
+                app.HeightInput.Value = app.HeightInput.Value * in2mm;
+            elseif app.mmOrIn == "mm"
+                app.WidthInput.Value = app.WidthInput.Value / in2mm;
+                app.LengthInput.Value = app.LengthInput.Value / in2mm;
+                app.HeightInput.Value = app.HeightInput.Value / in2mm;
+            end
+            app.mmOrIn = app.UnitsInput.Value;
+            
+        end
+
+        % Value changed function: trailerHeight, trailerLength, 
+        % ...and 2 other components
+        function TrailerAdvSettings(app, event)
+            % W[in], L[in], H[in], M[kg]
+            app.vDim(1) = app.trailerWidth.Value;
+            app.vDim(2) = app.trailerLength.Value;
+            app.vDim(3) = app.trailerHeight.Value;
+            app.vDim(4) = app.trailerMass.Value;
+        end
+
+        % Button pushed function: ChangeInputParametersButton
+        function ChangeInputParameters(app, event)
+            onValue = app.ChangeInputParametersButton.Visible;
+
+            app.UnitsInput.Enable = onValue;
+            app.WidthInput.Enable = onValue;
+            app.LengthInput.Enable = onValue;
+            app.HeightInput.Enable = onValue;
+            app.MassInput.Enable = onValue;
+            app.TrailerInput.Enable = onValue;
+
+            app.VaryLabel.Enable = onValue;
+            app.modWbox.Enable = onValue;
+            app.modLbox.Enable = onValue;
+            app.modHbox.Enable = onValue;
+            
+            app.ChangeInputParametersButton.Enable = ~onValue;
+            app.ChangeInputParametersButton.Visible = ~onValue;
+
+            app.CustomInputDims.Value = onValue;
+            app.scenario = 5;
+        end
+
+        % Selection changed function: ButtonGroup
+        function selectScenario(app, event)
+            selectUnitsBool = false;
+            custDistBool = false;
+            
+            if app.scenario == 5 || ~app.ChangeInputParametersButton.Visible
+                ChangeInputParameters(app); 
+            end
+            
+            if app.Unitsasinput.Value == true 
+                app.scenario = 1;
+                selectUnitsBool = true;
+            elseif app.Gen4Data.Value == true, app.scenario = 2;
+            elseif app.CustomDistance.Value == true
+                app.scenario = 3;
+                custDistBool = true;
+            elseif app.StepFunction.Value == true, app.scenario = 4;
+            elseif app.CustomInputDims.Value == true
+                app.scenario = 5;
+                app.TabGroup.SelectedTab = app.InputsTab;
+                ChangeInputParameters(app);
+            end
+            
+            %if app.CustomInputDims.Value == false, ChangeInputParameters(app); end
+            app.DesiredUnitsIn.Enable = selectUnitsBool;
+            app.DistanceInBox.Enable = custDistBool;
+            
+        end
+    end
+
+    % Component initialization
+    methods (Access = private)
+
+        % Create UIFigure and components
+        function createComponents(app)
+
+            % Create UIFigure and hide until all components are created
+            app.UIFigure = uifigure('Visible', 'off');
+            app.UIFigure.Position = [900 400 775 526];
+            app.UIFigure.Name = 'MATLAB App';
+
+            % Create CalculateButton
+            app.CalculateButton = uibutton(app.UIFigure, 'push');
+            app.CalculateButton.ButtonPushedFcn = createCallbackFcn(app, @Calculate, true);
+            app.CalculateButton.BackgroundColor = [0.0784 0.7804 0.349];
+            app.CalculateButton.FontSize = 24;
+            app.CalculateButton.FontWeight = 'bold';
+            app.CalculateButton.Position = [129 48 128 38];
+            app.CalculateButton.Text = 'Calculate';
+
+            % Create TabGroup
+            app.TabGroup = uitabgroup(app.UIFigure);
+            app.TabGroup.Position = [23 98 364 314];
+
+            % Create Scenarios
+            app.Scenarios = uitab(app.TabGroup);
+            app.Scenarios.Title = 'Scenarios';
+
+            % Create ButtonGroup
+            app.ButtonGroup = uibuttongroup(app.Scenarios);
+            app.ButtonGroup.SelectionChangedFcn = createCallbackFcn(app, @selectScenario, true);
+            app.ButtonGroup.Title = 'Button Group';
+            app.ButtonGroup.Position = [19 79 157 162];
+
+            % Create Unitsasinput
+            app.Unitsasinput = uiradiobutton(app.ButtonGroup);
+            app.Unitsasinput.Text = 'Units as input';
+            app.Unitsasinput.Position = [11 116 95 22];
+            app.Unitsasinput.Value = true;
+
+            % Create Gen4Data
+            app.Gen4Data = uiradiobutton(app.ButtonGroup);
+            app.Gen4Data.Text = 'Gen 4 Data';
+            app.Gen4Data.Position = [11 94 83 22];
+
+            % Create CustomDistance
+            app.CustomDistance = uiradiobutton(app.ButtonGroup);
+            app.CustomDistance.Text = 'Custom Distance';
+            app.CustomDistance.Position = [11 72 113 22];
+
+            % Create StepFunction
+            app.StepFunction = uiradiobutton(app.ButtonGroup);
+            app.StepFunction.Text = 'Step Function';
+            app.StepFunction.Position = [11 50 130 22];
+
+            % Create CustomInputDims
+            app.CustomInputDims = uiradiobutton(app.ButtonGroup);
+            app.CustomInputDims.Text = 'Custom Input Dims';
+            app.CustomInputDims.Position = [11 28 130 22];
+
+            % Create DesiredUnitsEditFieldLabel
+            app.DesiredUnitsEditFieldLabel = uilabel(app.Scenarios);
+            app.DesiredUnitsEditFieldLabel.HorizontalAlignment = 'right';
+            app.DesiredUnitsEditFieldLabel.Position = [206 218 78 22];
+            app.DesiredUnitsEditFieldLabel.Text = 'Desired Units';
+
+            % Create DesiredUnitsIn
+            app.DesiredUnitsIn = uieditfield(app.Scenarios, 'numeric');
+            app.DesiredUnitsIn.Position = [206 191 78 22];
+            app.DesiredUnitsIn.Value = 200;
+
+            % Create DistanceMilesEditFieldLabel
+            app.DistanceMilesEditFieldLabel = uilabel(app.Scenarios);
+            app.DistanceMilesEditFieldLabel.HorizontalAlignment = 'right';
+            app.DistanceMilesEditFieldLabel.Position = [207 166 92 22];
+            app.DistanceMilesEditFieldLabel.Text = 'Distance (Miles)';
+
+            % Create DistanceInBox
+            app.DistanceInBox = uieditfield(app.Scenarios, 'numeric');
+            app.DistanceInBox.Enable = 'off';
+            app.DistanceInBox.Position = [209 142 77 22];
+            app.DistanceInBox.Value = 1000;
+
+            % Create InputsTab
+            app.InputsTab = uitab(app.TabGroup);
+            app.InputsTab.Title = 'Inputs';
+
+            % Create modHbox
+            app.modHbox = uicheckbox(app.InputsTab);
+            app.modHbox.ValueChangedFcn = createCallbackFcn(app, @Inputs, true);
+            app.modHbox.Enable = 'off';
+            app.modHbox.Text = '';
+            app.modHbox.Position = [152 130 28 22];
+
+            % Create modLbox
+            app.modLbox = uicheckbox(app.InputsTab);
+            app.modLbox.ValueChangedFcn = createCallbackFcn(app, @Inputs, true);
+            app.modLbox.Enable = 'off';
+            app.modLbox.Text = '';
+            app.modLbox.Position = [152 179 28 22];
+
+            % Create modWbox
+            app.modWbox = uicheckbox(app.InputsTab);
+            app.modWbox.ValueChangedFcn = createCallbackFcn(app, @Inputs, true);
+            app.modWbox.Enable = 'off';
+            app.modWbox.Text = '';
+            app.modWbox.Position = [152 227 28 22];
+
+            % Create VaryLabel
+            app.VaryLabel = uilabel(app.InputsTab);
+            app.VaryLabel.FontWeight = 'bold';
+            app.VaryLabel.Enable = 'off';
+            app.VaryLabel.Position = [144 252 38 22];
+            app.VaryLabel.Text = 'Vary?';
+
+            % Create TrailerDropDownLabel
+            app.TrailerDropDownLabel = uilabel(app.InputsTab);
+            app.TrailerDropDownLabel.HorizontalAlignment = 'right';
+            app.TrailerDropDownLabel.Position = [34 43 39 22];
+            app.TrailerDropDownLabel.Text = 'Trailer';
+
+            % Create TrailerInput
+            app.TrailerInput = uidropdown(app.InputsTab);
+            app.TrailerInput.Items = {'53'' Flatbed', '53'' Dry Van', '48'' Conestoga', '40'' HC Sea', '40'' Sea', 'Custom'};
+            app.TrailerInput.ValueChangedFcn = createCallbackFcn(app, @TrailerSelection, true);
+            app.TrailerInput.Enable = 'off';
+            app.TrailerInput.Position = [83 43 100 22];
+            app.TrailerInput.Value = '53'' Flatbed';
+
+            % Create WidthLabel
+            app.WidthLabel = uilabel(app.InputsTab);
+            app.WidthLabel.HorizontalAlignment = 'right';
+            app.WidthLabel.Position = [6 226 13 22];
+            app.WidthLabel.Text = 'W';
+
+            % Create WidthInput
+            app.WidthInput = uieditfield(app.InputsTab, 'numeric');
+            app.WidthInput.ValueChangedFcn = createCallbackFcn(app, @Inputs, true);
+            app.WidthInput.Enable = 'off';
+            app.WidthInput.Position = [29 226 100 22];
+            app.WidthInput.Value = 12.48;
+
+            % Create LengthLabel
+            app.LengthLabel = uilabel(app.InputsTab);
+            app.LengthLabel.HorizontalAlignment = 'right';
+            app.LengthLabel.Position = [10 179 13 22];
+            app.LengthLabel.Text = 'L';
+
+            % Create LengthInput
+            app.LengthInput = uieditfield(app.InputsTab, 'numeric');
+            app.LengthInput.ValueChangedFcn = createCallbackFcn(app, @Inputs, true);
+            app.LengthInput.Enable = 'off';
+            app.LengthInput.Position = [33 179 100 22];
+            app.LengthInput.Value = 56.42;
+
+            % Create HLabel
+            app.HLabel = uilabel(app.InputsTab);
+            app.HLabel.HorizontalAlignment = 'right';
+            app.HLabel.Position = [9 128 13 22];
+            app.HLabel.Text = 'H';
+
+            % Create HeightInput
+            app.HeightInput = uieditfield(app.InputsTab, 'numeric');
+            app.HeightInput.ValueChangedFcn = createCallbackFcn(app, @Inputs, true);
+            app.HeightInput.Enable = 'off';
+            app.HeightInput.Position = [32 128 100 22];
+            app.HeightInput.Value = 57.81;
+
+            % Create MasskgEditFieldLabel
+            app.MasskgEditFieldLabel = uilabel(app.InputsTab);
+            app.MasskgEditFieldLabel.HorizontalAlignment = 'right';
+            app.MasskgEditFieldLabel.Position = [0 78 73 22];
+            app.MasskgEditFieldLabel.Text = 'Mass (kg)';
+
+            % Create MassInput
+            app.MassInput = uieditfield(app.InputsTab, 'numeric');
+            app.MassInput.ValueChangedFcn = createCallbackFcn(app, @Inputs, true);
+            app.MassInput.Enable = 'off';
+            app.MassInput.Position = [83 78 100 22];
+            app.MassInput.Value = 39.51;
+
+            % Create UnitsInput
+            app.UnitsInput = uiswitch(app.InputsTab, 'slider');
+            app.UnitsInput.Items = {'mm', 'in.'};
+            app.UnitsInput.ValueChangedFcn = createCallbackFcn(app, @UnitsInDetect, true);
+            app.UnitsInput.Enable = 'off';
+            app.UnitsInput.Position = [54 263 45 20];
+            app.UnitsInput.Value = 'in.';
+
+            % Create ChangeInputParametersButton
+            app.ChangeInputParametersButton = uibutton(app.InputsTab, 'push');
+            app.ChangeInputParametersButton.ButtonPushedFcn = createCallbackFcn(app, @ChangeInputParameters, true);
+            app.ChangeInputParametersButton.BackgroundColor = [1 0.7333 0.3608];
+            app.ChangeInputParametersButton.FontSize = 18;
+            app.ChangeInputParametersButton.FontWeight = 'bold';
+            app.ChangeInputParametersButton.Position = [113 133 160 55];
+            app.ChangeInputParametersButton.Text = {'Change Input'; 'Parameters'};
+
+            % Create AllowableVariationSlider_2Label
+            app.AllowableVariationSlider_2Label = uilabel(app.InputsTab);
+            app.AllowableVariationSlider_2Label.HorizontalAlignment = 'right';
+            app.AllowableVariationSlider_2Label.FontWeight = 'bold';
+            app.AllowableVariationSlider_2Label.Position = [194 252 138 22];
+            app.AllowableVariationSlider_2Label.Text = 'Allowable Variation (%)';
+
+            % Create varW
+            app.varW = uislider(app.InputsTab);
+            app.varW.Limits = [5 30];
+            app.varW.Enable = 'off';
+            app.varW.Visible = 'off';
+            app.varW.Position = [197 239 146 3];
+            app.varW.Value = 20;
+
+            % Create varH
+            app.varH = uislider(app.InputsTab);
+            app.varH.Limits = [5 30];
+            app.varH.Enable = 'off';
+            app.varH.Visible = 'off';
+            app.varH.Position = [196 140 146 3];
+            app.varH.Value = 20;
+
+            % Create varL
+            app.varL = uislider(app.InputsTab);
+            app.varL.Limits = [5 30];
+            app.varL.Enable = 'off';
+            app.varL.Visible = 'off';
+            app.varL.Position = [196 193 146 3];
+            app.varL.Value = 20;
+
+            % Create OutputTab
+            app.OutputTab = uitab(app.TabGroup);
+            app.OutputTab.Title = 'Output';
+
+            % Create IdealDimensionsCheckBox
+            app.IdealDimensionsCheckBox = uicheckbox(app.OutputTab);
+            app.IdealDimensionsCheckBox.ValueChangedFcn = createCallbackFcn(app, @OutputSettings, true);
+            app.IdealDimensionsCheckBox.Text = 'Ideal Dimensions';
+            app.IdealDimensionsCheckBox.Position = [23 213 114 22];
+
+            % Create OriginalDimensionsCheckBox
+            app.OriginalDimensionsCheckBox = uicheckbox(app.OutputTab);
+            app.OriginalDimensionsCheckBox.ValueChangedFcn = createCallbackFcn(app, @OutputSettings, true);
+            app.OriginalDimensionsCheckBox.Text = 'Original Dimensions';
+            app.OriginalDimensionsCheckBox.Position = [23 243 129 22];
+            app.OriginalDimensionsCheckBox.Value = true;
+
+            % Create outUnitsSwitch
+            app.outUnitsSwitch = uiswitch(app.OutputTab, 'slider');
+            app.outUnitsSwitch.Items = {'mm', 'in.'};
+            app.outUnitsSwitch.ValueChangedFcn = createCallbackFcn(app, @OutputSettings, true);
+            app.outUnitsSwitch.Position = [53 70 45 20];
+            app.outUnitsSwitch.Value = 'mm';
+
+            % Create GraphCheckBox
+            app.GraphCheckBox = uicheckbox(app.OutputTab);
+            app.GraphCheckBox.Enable = 'off';
+            app.GraphCheckBox.Text = 'Graph Ideal';
+            app.GraphCheckBox.Position = [24 183 85 22];
+
+            % Create AllowableVariationLabel
+            app.AllowableVariationLabel = uilabel(app.OutputTab);
+            app.AllowableVariationLabel.HorizontalAlignment = 'right';
+            app.AllowableVariationLabel.Position = [24 149 129 22];
+            app.AllowableVariationLabel.Text = 'Allowable Variation (%)';
+
+            % Create AllowableVariationSlider
+            app.AllowableVariationSlider = uislider(app.OutputTab);
+            app.AllowableVariationSlider.Limits = [5 30];
+            app.AllowableVariationSlider.Enable = 'off';
+            app.AllowableVariationSlider.Position = [29 138 146 3];
+            app.AllowableVariationSlider.Value = 20;
+
+            % Create AdvancedTab
+            app.AdvancedTab = uitab(app.TabGroup);
+            app.AdvancedTab.Title = 'Advanced';
+
+            % Create LengthEditFieldLabel_6
+            app.LengthEditFieldLabel_6 = uilabel(app.AdvancedTab);
+            app.LengthEditFieldLabel_6.HorizontalAlignment = 'right';
+            app.LengthEditFieldLabel_6.FontSize = 14;
+            app.LengthEditFieldLabel_6.FontWeight = 'bold';
+            app.LengthEditFieldLabel_6.Position = [53 257 100 22];
+            app.LengthEditFieldLabel_6.Text = 'Trailer Interior';
+
+            % Create LengthinLabel
+            app.LengthinLabel = uilabel(app.AdvancedTab);
+            app.LengthinLabel.HorizontalAlignment = 'right';
+            app.LengthinLabel.Position = [23 227 73 22];
+            app.LengthinLabel.Text = 'Length (in)';
+
+            % Create trailerLength
+            app.trailerLength = uieditfield(app.AdvancedTab, 'numeric');
+            app.trailerLength.ValueChangedFcn = createCallbackFcn(app, @TrailerAdvSettings, true);
+            app.trailerLength.Enable = 'off';
+            app.trailerLength.Position = [106 227 70 22];
+            app.trailerLength.Value = 636;
+
+            % Create WidthinLabel
+            app.WidthinLabel = uilabel(app.AdvancedTab);
+            app.WidthinLabel.HorizontalAlignment = 'right';
+            app.WidthinLabel.Position = [23 192 73 22];
+            app.WidthinLabel.Text = 'Width (in)';
+
+            % Create trailerWidth
+            app.trailerWidth = uieditfield(app.AdvancedTab, 'numeric');
+            app.trailerWidth.ValueChangedFcn = createCallbackFcn(app, @TrailerAdvSettings, true);
+            app.trailerWidth.Enable = 'off';
+            app.trailerWidth.Position = [106 192 70 22];
+            app.trailerWidth.Value = 102;
+
+            % Create MasskgEditFieldLabel_2
+            app.MasskgEditFieldLabel_2 = uilabel(app.AdvancedTab);
+            app.MasskgEditFieldLabel_2.HorizontalAlignment = 'right';
+            app.MasskgEditFieldLabel_2.Position = [23 123 73 22];
+            app.MasskgEditFieldLabel_2.Text = 'Mass (kg)';
+
+            % Create trailerMass
+            app.trailerMass = uieditfield(app.AdvancedTab, 'numeric');
+            app.trailerMass.ValueChangedFcn = createCallbackFcn(app, @TrailerAdvSettings, true);
+            app.trailerMass.Enable = 'off';
+            app.trailerMass.Position = [106 123 70 22];
+            app.trailerMass.Value = 21772.434;
+
+            % Create WidthinLabel_2
+            app.WidthinLabel_2 = uilabel(app.AdvancedTab);
+            app.WidthinLabel_2.HorizontalAlignment = 'right';
+            app.WidthinLabel_2.Position = [23 158 73 22];
+            app.WidthinLabel_2.Text = 'Height (in)';
+
+            % Create trailerHeight
+            app.trailerHeight = uieditfield(app.AdvancedTab, 'numeric');
+            app.trailerHeight.ValueChangedFcn = createCallbackFcn(app, @TrailerAdvSettings, true);
+            app.trailerHeight.Enable = 'off';
+            app.trailerHeight.Position = [106 158 70 22];
+            app.trailerHeight.Value = 102;
+
+            % Create HomePlateSwitch
+            app.HomePlateSwitch = uiswitch(app.AdvancedTab, 'slider');
+            app.HomePlateSwitch.Items = {'Home Plate', 'Boundary Box'};
+            app.HomePlateSwitch.Orientation = 'vertical';
+            app.HomePlateSwitch.Position = [252 183 20 45];
+            app.HomePlateSwitch.Value = 'Home Plate';
+
+            % Create ShippingEfficiencyCalculatorLabel
+            app.ShippingEfficiencyCalculatorLabel = uilabel(app.UIFigure);
+            app.ShippingEfficiencyCalculatorLabel.BackgroundColor = [0.1294 0.6314 0.851];
+            app.ShippingEfficiencyCalculatorLabel.HorizontalAlignment = 'center';
+            app.ShippingEfficiencyCalculatorLabel.FontSize = 38;
+            app.ShippingEfficiencyCalculatorLabel.FontWeight = 'bold';
+            app.ShippingEfficiencyCalculatorLabel.Position = [56 447 611 71];
+            app.ShippingEfficiencyCalculatorLabel.Text = 'Shipping Efficiency Calculator';
+
+            % Create ResultsTextAreaLabel
+            app.ResultsTextAreaLabel = uilabel(app.UIFigure);
+            app.ResultsTextAreaLabel.HorizontalAlignment = 'right';
+            app.ResultsTextAreaLabel.FontSize = 18;
+            app.ResultsTextAreaLabel.FontWeight = 'bold';
+            app.ResultsTextAreaLabel.Position = [421 417 71 23];
+            app.ResultsTextAreaLabel.Text = 'Results';
+
+            % Create ResultsTextArea
+            app.ResultsTextArea = uitextarea(app.UIFigure);
+            app.ResultsTextArea.ValueChangedFcn = createCallbackFcn(app, @Output, true);
+            app.ResultsTextArea.FontSize = 15;
+            app.ResultsTextArea.Position = [420 233 337 179];
+            app.ResultsTextArea.Value = {'Set your desired scenario, then hit "Calculate"'; ''; '                ___________________'; '      ___   |    HELIOGEN                |'; '    /_|    |  |    HELIOSTATS             |'; '   |        |_|__________________   |'; '   "-0----0-0'' `                          `0`0''-'''};
+
+            % Create resultsTable
+            app.resultsTable = uitable(app.UIFigure);
+            app.resultsTable.ColumnName = {'Cost'; 'Units'; 'Vol. Eff.'; 'Mass Eff'};
+            app.resultsTable.RowName = {};
+            app.resultsTable.Enable = 'off';
+            app.resultsTable.Visible = 'off';
+            app.resultsTable.Position = [422 22 336 185];
+
+            % Show the figure after all components are created
+            app.UIFigure.Visible = 'on';
+        end
+    end
+
+    % App creation and deletion
+    methods (Access = public)
+
+        % Construct app
+        function app = Efficiency_Calculator_App
+
+            % Create UIFigure and components
+            createComponents(app)
+
+            % Register the app with App Designer
+            registerApp(app, app.UIFigure)
+
+            if nargout == 0
+                clear app
+            end
+        end
+
+        % Code that executes before app deletion
+        function delete(app)
+
+            % Delete UIFigure when app is deleted
+            delete(app.UIFigure)
+        end
+    end
+end
